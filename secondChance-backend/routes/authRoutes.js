@@ -49,3 +49,47 @@ router.post('/register', async (req, res) => {
          return res.status(500).send('Internal server error');
     }
 });
+
+router.post('/login', async (req, res) => {
+    try {
+        // Task 1: Connect to `secondChance` in MongoDB through `connectToDatabase` in `db.js`.
+        const db = await connectToDatabase()
+
+        // Task 2: Access MongoDB `users` collection
+        const collection = db.collection("users");
+
+        // Task 3: Check for user credentials in database
+        const user = await collection.findOne({ email: req.body.email });
+
+        // Task 4: Check if the password matches the encrypted password and send appropriate message on mismatch
+        if (user) {
+            let result = await bcryptjs.compare(req.body.password, user.password)
+            if (!result) {
+                logger.error('Passwords do not match');
+                return res.status(404).json({ error: 'Wrong pasword' });
+            }
+            
+            // Task 5: Fetch user details from a database
+            const userName = theUser.firstName;
+            const userEmail = theUser.email;
+            
+            // Task 6: Create JWT authentication if passwords match with user._id as payload
+            let payload = {
+                user: {
+                    id: theUser._id.toString(),
+                },
+            };
+            jwt.sign(user._id, JWT_SECRET)
+
+        // Task 7: Send appropriate message if the user is not found
+        } else {
+            logger.error('User not found');
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        res.json({authtoken, userName, userEmail });
+    } catch (e) {
+         return res.status(500).send('Internal server error');
+
+    }
+});
