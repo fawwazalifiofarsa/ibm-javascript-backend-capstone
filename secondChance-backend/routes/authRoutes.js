@@ -1,146 +1,122 @@
-const express = require('express');
-const router = express.Router();
-const connectToDatabase = require('../models/db');
-const { body, validationResult } = require('express-validator');
+const express = require('express')
+const router = express.Router()
+const connectToDatabase = require('../models/db')
+const { validationResult } = require('express-validator')
+const bcryptjs = require('bcryptjs')
+const jwt = require('jsonwebtoken')
+const logger = require('../logger')
+
+const { JWT_SECRET } = process.env
 
 router.post('/register', async (req, res) => {
-    try {
-        // Task 1: Connect to `secondChance` in MongoDB through `connectToDatabase` in `db.js`.
-        const db = await connectToDatabase()
+  try {
+    // Connect & collection
+    const db = await connectToDatabase()
+    const collection = db.collection('users')
 
-        // Task 2: Access MongoDB `users` collection
-        const collection = db.collection("users");
-
-        // Task 3: Check if user credentials already exists in the database and throw an error if they do
-        const existingEmail = await collection.findOne({ email: req.body.email });
-
-        if (existingEmail) {
-            logger.error('Email id already exists');
-            return res.status(400).json({ error: 'Email id already exists' });
-        }
-
-        // Task 4: Create a hash to encrypt the password so that it is not readable in the database
-        const salt = await bcryptjs.genSalt(10);
-        const hash = await bcryptjs.hash(req.body.password, salt);
-
-        // Task 5: Insert the user into the database
-        const newUser = await collection.insertOne({
-            email: req.body.email,
-            firstName: req.body.firstName,
-            lastName: req.body.lastName,
-            password: hash,
-            createdAt: new Date(),
-        });
-
-        // Task 6: Create JWT authentication if passwords match with user._id as payload
-        const payload = {
-            user: {
-                id: newUser.insertedId,
-            },
-        };
-
-        const authtoken = jwt.sign(payload, JWT_SECRET);
-
-        // Task 7: Log the successful registration using the logger
-        logger.info('User registered successfully');
-
-        // Task 8: Return the user email and the token as a JSON
-        res.json({ authtoken,email });
-    } catch (e) {
-         return res.status(500).send('Internal server error');
+    // Email exists?
+    const existingEmail = await collection.findOne({ email: req.body.email })
+    if (existingEmail) {
+      logger.error('Email id already exists')
+      return res.status(400).json({ error: 'Email id already exists' })
     }
-});
+
+    // Hash password
+    const salt = await bcryptjs.genSalt(10)
+    const hash = await bcryptjs.hash(req.body.password, salt)
+
+    // Insert
+    const result = await collection.insertOne({
+      email: req.body.email,
+      firstName: req.body.firstName,
+      lastName: req.body.lastName,
+      password: hash,
+      createdAt: new Date()
+    })
+
+    // Token
+    const payload = { user: { id: result.insertedId.toString() } }
+    const authtoken = jwt.sign(payload, JWT_SECRET)
+
+    logger.info('User registered successfully')
+
+    // Respond
+    res.json({ authtoken, email: req.body.email })
+  } catch (e) {
+    return res.status(500).send('Internal server error')
+  }
+})
 
 router.post('/login', async (req, res) => {
-    try {
-        // Task 1: Connect to `secondChance` in MongoDB through `connectToDatabase` in `db.js`.
-        const db = await connectToDatabase()
+  try {
+    const db = await connectToDatabase()
+    const collection = db.collection('users')
 
-        // Task 2: Access MongoDB `users` collection
-        const collection = db.collection("users");
+    const user = await collection.findOne({ email: req.body.email })
 
-        // Task 3: Check for user credentials in database
-        const user = await collection.findOne({ email: req.body.email });
-
-        // Task 4: Check if the password matches the encrypted password and send appropriate message on mismatch
-        if (user) {
-            let result = await bcryptjs.compare(req.body.password, user.password)
-            if (!result) {
-                logger.error('Passwords do not match');
-                return res.status(404).json({ error: 'Wrong pasword' });
-            }
-
-            // Task 5: Fetch user details from a database
-            const userName = theUser.firstName;
-            const userEmail = theUser.email;
-            
-            // Task 6: Create JWT authentication if passwords match with user._id as payload
-            let payload = {
-                user: {
-                    id: theUser._id.toString(),
-                },
-            };
-            jwt.sign(user._id, JWT_SECRET)
-
-        // Task 7: Send appropriate message if the user is not found
-        } else {
-            logger.error('User not found');
-            return res.status(404).json({ error: 'User not found' });
-        }
-
-        res.json({authtoken, userName, userEmail });
-    } catch (e) {
-         return res.status(500).send('Internal server error');
-
+    if (!user) {
+      logger.error('User not found')
+      return res.status(404).json({ error: 'User not found' })
     }
-});
+
+    const ok = await bcryptjs.compare(req.body.password, user.password)
+    if (!ok) {
+      logger.error('Passwords do not match')
+      return res.status(404).json({ error: 'Wrong password' })
+    }
+
+    const userName = user.firstName
+    const userEmail = user.email
+
+    const payload = { user: { id: user._id.toString() } }
+    const authtoken = jwt.sign(payload, JWT_SECRET)
+
+    return res.json({ authtoken, userName, userEmail })
+  } catch (e) {
+    return res.status(500).send('Internal server error')
+  }
+})
 
 router.put('/update', async (req, res) => {
+  // Validate input (you can add specific validators on the route if desired)
+  const errors = validationResult(req)
+  if (!errors.isEmpty()) {
+    logger.error('Validation errors in update request', errors.array())
+    return res.status(400).json({ errors: errors.array() })
+  }
 
-    // Task 2: Validate the input using `validationResult` and return an appropriate message if you detect an error
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        logger.error('Validation errors in update request', errors.array());
-        return res.status(400).json({ errors: errors.array() });
+  try {
+    // Email in headers
+    const email = req.headers.email
+    if (!email) {
+      logger.error('Email not found in the request headers')
+      return res.status(400).json({ error: 'Email not found in the request headers' })
     }
-    try {
-        // Task 3: Check if `email` is present in the header and throw an appropriate error message if it is not present
-         const email = req.headers.email;
 
-        if (!email) {
-            logger.error('Email not found in the request headers');
-            return res.status(400).json({ error: "Email not found in the request headers" });
-        }
+    const db = await connectToDatabase()
+    const collection = db.collection('users')
 
-        // Task 4: Connect to MongoDB
-        const db = await connectToDatabase();
-        const collection = db.collection("users");
-
-        // Task 5: Find the user credentials in database
-        const existingUser = await collection.findOne({ email });
-
-        existingUser.updatedAt = new Date();
-
-        // Task 6: Update the user credentials in the database
-        const updatedUser = await collection.findOneAndUpdate(
-            { email },
-            { $set: existingUser },
-            { returnDocument: 'after' }
-        );
-
-        // Task 7: Create JWT authentication with `user._id` as a payload using the secret key from the .env file
-        const payload = {
-            user: {
-            id: updatedUser._id.toString(),
-            },
-        };
-
-        const authtoken = jwt.sign(payload, JWT_SECRET);
-        res.json({authtoken});
-    } catch (e) {
-         return res.status(500).send('Internal server error');
-
+    const existingUser = await collection.findOne({ email })
+    if (!existingUser) {
+      logger.error('User not found for update')
+      return res.status(404).json({ error: 'User not found' })
     }
-});
+
+    existingUser.updatedAt = new Date()
+
+    const updated = await collection.findOneAndUpdate(
+      { email },
+      { $set: existingUser },
+      { returnDocument: 'after' }
+    )
+
+    const payload = { user: { id: updated.value._id.toString() } }
+    const authtoken = jwt.sign(payload, JWT_SECRET)
+
+    return res.json({ authtoken })
+  } catch (e) {
+    return res.status(500).send('Internal server error')
+  }
+})
 
 module.exports = router
